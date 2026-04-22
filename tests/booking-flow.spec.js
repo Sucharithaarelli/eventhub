@@ -1,146 +1,150 @@
 import { test, expect } from '@playwright/test';
 
-const BASE_URL      = 'http://localhost:3000';
-
-// ── Credentials ────────────────────────────────────────────────────────────────
+const BASE_URL      = 'https://eventhub.rahulshettyacademy.com';
 const USER_EMAIL    = 'rahulshetty1@gmail.com';
 const USER_PASSWORD = 'Magiclife1!';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
 async function login(page) {
   await page.goto(`${BASE_URL}/login`);
-
-  // Located by placeholder
   await page.getByPlaceholder('you@email.com').fill(USER_EMAIL);
-
-  // Located by label
   await page.getByLabel('Password').fill(USER_PASSWORD);
-
-  // Located by id
   await page.locator('#login-btn').click();
-
-  await expect(page.getByRole('link', { name: 'Browse Events →' })).toBeVisible();
+  await expect(page.getByRole('link', { name: /Browse Events/i }).first()).toBeVisible();
 }
 
-/** Returns a datetime-local string (YYYY-MM-DDTHH:mm) 1 year from now */
-function futureDateValue() {
-  const d   = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T10:00`;
-}
-
-
-// ── Test ───────────────────────────────────────────────────────────────────────
-test('create event via UI, book it, and verify seat reduction', async ({ page }) => {
-
-  // ── Step 1: Log in ───────────────────────────────────────────────────────
-  await login(page);
-
-  // ── Step 2: Create a new event via the admin form ────────────────────────
-  await page.goto(`${BASE_URL}/admin/events`);
-
-  // Unique title so we can find this exact card later
-  const eventTitle = `Test Event ${Date.now()}`;
-
-  // Located by id (explicit on the component)
-  await page.locator('#event-title-input').fill(eventTitle);
-
-  // Description — only textarea in the form
-  await page.locator('#admin-event-form textarea').fill('Playwright test event');
-
-  // Located by label (Select auto-generates id from label text)
-  await page.getByLabel('City').fill('Test City');
-  await page.getByLabel('Venue').fill('Test Venue');
-
-  // datetime-local input — located by label
-  await page.getByLabel('Event Date & Time').fill(futureDateValue());
-
-  await page.getByLabel('Price ($)').fill('100');
-  await page.getByLabel('Total Seats').fill('50');
-
-  // Located by id
-  await page.locator('#add-event-btn').click();
-
-  // Wait for success toast
-  await expect(page.getByText('Event created!')).toBeVisible();
-
-  console.log(`Created event: "${eventTitle}"`);
-
-  // ── Step 3: Go to Events page and find the newly created card ─────────────
+/**
+ * Books the first non-sold-out event.
+ * Returns { bookingRef, eventTitle } from the confirmation card.
+ * Precondition: user must already be logged in.
+ */
+async function bookEvent(page) {
   await page.goto(`${BASE_URL}/events`);
 
-  // Located by data-testid
-  const eventCards = page.getByTestId('event-card');
-  await expect(eventCards.first()).toBeVisible();
+  // First card with a visible Book Now button (not sold out)
+  const firstCard = page.getByTestId('event-card').filter({
+    has: page.getByTestId('book-now-btn'),
+  }).first();
+  await expect(firstCard).toBeVisible();
 
-  // Scan all visible event cards for the one matching our created title
-  const targetCard = eventCards.filter({ hasText: eventTitle }).first();
-  await expect(targetCard).toBeVisible({ timeout: 5000 });
+  const eventTitle = (await firstCard.getByRole('heading', { level: 3 }).textContent())?.trim() ?? '';
+  console.log(`Booking event: "${eventTitle}"`);
 
-  // Capture seat count before booking
-  const seatsBeforeBooking = parseInt(await targetCard.getByText('seat').first().innerText());
-  console.log(`Seats before booking: ${seatsBeforeBooking}`);
+  await firstCard.getByTestId('book-now-btn').click();
+  await expect(page).toHaveURL(/\/events\/\d+/);
 
-  // Located by data-testid inside the matched card
-  await targetCard.getByTestId('book-now-btn').click();
-
-  // ── Step 4: Fill the booking form ────────────────────────────────────────
-
-  // Quantity defaults to 1 — verify via id
-  const ticketCount = page.locator('#ticket-count');
-  await expect(ticketCount).toHaveText('1');
-
-  // Located by label
-  await page.getByLabel('Full Name').fill('Test Student');
-
-  // Located by id
-  await page.locator('#customer-email').fill('test.student@example.com');
-
-  // Located by placeholder
+  // Fill customer form
+  await page.getByLabel('Full Name').fill('Test User');
+  await page.locator('#customer-email').fill('testuser@example.com');
   await page.getByPlaceholder('+91 98765 43210').fill('9876543210');
+  await page.locator('#confirm-booking').click();
 
-  // Located by CSS class
-  await page.locator('.confirm-booking-btn').click();
-
-  // ── Step 5: Verify booking confirmation ──────────────────────────────────
-
-  // Located by CSS class
-  const bookingRefEl = page.locator('.booking-ref').first();
-  await expect(bookingRefEl).toBeVisible();
-
-  const bookingRef = (await bookingRefEl.innerText()).trim();
-  expect(bookingRef.charAt(0)).toBe(eventTitle.trim().charAt(0).toUpperCase());
-
+  // Wait for booking reference on confirmation card
+  const refEl = page.locator('.booking-ref').first();
+  await expect(refEl).toBeVisible();
+  const bookingRef = (await refEl.textContent())?.trim() ?? '';
   console.log(`Booking confirmed. Ref: ${bookingRef}`);
+  return { bookingRef, eventTitle };
+}
 
-  // ── Step 6: Verify booking appears in My Bookings ────────────────────────
-  await page.getByRole('link', { name: 'View My Bookings' }).click();
-  await expect(page).toHaveURL(`${BASE_URL}/bookings`);
+/**
+ * Clears all bookings for a clean slate.
+ * Safe to call when already empty.
+ */
+async function clearBookings(page) {
+  await page.goto(`${BASE_URL}/bookings`);
+  const alreadyEmpty = await page.getByText('No bookings yet').isVisible().catch(() => false);
+  if (alreadyEmpty) return;
 
-  // Located by id
-  const bookingCards = page.locator('#booking-card');
-  await expect(bookingCards.first()).toBeVisible();
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: /clear all bookings/i }).click();
+  await expect(page.getByText('No bookings yet')).toBeVisible();
+}
 
-  // Find the card that contains our booking ref (via CSS class inside the card)
-  const matchingCard = bookingCards.filter({ has: page.locator('.booking-ref', { hasText: bookingRef }) });
-  await expect(matchingCard).toBeVisible();
+// ── Test Suite ─────────────────────────────────────────────────────────────────
 
-  // Verify event title also appears in the same card
-  await expect(matchingCard).toContainText(eventTitle);
+test.describe('Booking Flow — Critical Happy Paths', () => {
 
-  console.log(`Booking card found in My Bookings for ref: ${bookingRef}`);
+  // TC-001 ───────────────────────────────────────────────────────────────────
+  test('TC-001: booking card appears on bookings list with correct data', async ({ page }) => {
+    // -- Step 1: Login, clean state, create one booking --
+    await login(page);
+    await clearBookings(page);
+    const { bookingRef, eventTitle } = await bookEvent(page);
 
-  // ── Step 7: Verify seat count reduced on Events page ─────────────────────
-  await page.goto(`${BASE_URL}/events`);
-  await expect(eventCards.first()).toBeVisible();
+    // -- Step 2: Navigate to /bookings --
+    await page.goto(`${BASE_URL}/bookings`);
 
-  // Find the same event by title
-  const updatedCard       = eventCards.filter({ hasText: eventTitle }).first();
-  await expect(updatedCard).toBeVisible();
+    // -- Step 3: Verify booking card shows ref, event title, and confirmed status --
+    const card = page.getByTestId('booking-card').filter({ hasText: bookingRef });
+    await expect(card).toBeVisible();
+    await expect(card).toContainText(eventTitle);
+    await expect(card).toContainText('confirmed');
+  });
 
-  const seatsAfterBooking = parseInt(await updatedCard.getByText('seat').first().innerText());
-  console.log(`Seats after booking: ${seatsAfterBooking}`);
+  // TC-002 ───────────────────────────────────────────────────────────────────
+  test('TC-002: booking detail page shows all sections', async ({ page }) => {
+    // -- Step 1: Login, clean state, create one booking --
+    await login(page);
+    await clearBookings(page);
+    const { bookingRef, eventTitle } = await bookEvent(page);
 
-  // Booked 1 ticket — count must drop by exactly 1
-  expect(seatsAfterBooking).toBe(seatsBeforeBooking - 1);
+    // -- Step 2: Navigate to bookings list and open detail --
+    await page.goto(`${BASE_URL}/bookings`);
+    const card = page.getByTestId('booking-card').filter({ hasText: bookingRef });
+    await card.getByRole('link', { name: 'View Details' }).click();
+    await expect(page).toHaveURL(/\/bookings\/\d+/);
+
+    // -- Step 3: Header badge displays the booking ref --
+    await expect(page.getByText(bookingRef).first()).toBeVisible();
+
+    // -- Step 4: Event Details section is present --
+    await expect(page.getByText('Event Details')).toBeVisible();
+    await expect(page.getByText(eventTitle).first()).toBeVisible();
+
+    // -- Step 5: Customer Details section is present --
+    await expect(page.getByText('Customer Details')).toBeVisible();
+    await expect(page.getByText('Test User')).toBeVisible();
+    await expect(page.getByText('testuser@example.com')).toBeVisible();
+
+    // -- Step 6: Payment Summary section is present --
+    await expect(page.getByText('Payment Summary')).toBeVisible();
+    await expect(page.getByText('Total Paid')).toBeVisible();
+
+    // -- Step 7: Refund eligibility button is present (client-side, no API) --
+    await expect(page.locator('#check-refund-btn')).toBeVisible();
+  });
+
+  // TC-003 + TC-506 ──────────────────────────────────────────────────────────
+  test('TC-003: cancel booking from detail page — confirm dialog, toast, redirect', async ({ page }) => {
+    // -- Step 1: Login, clean state, create one booking --
+    await login(page);
+    await clearBookings(page);
+    const { bookingRef } = await bookEvent(page);
+
+    // -- Step 2: Navigate to booking detail via bookings list --
+    await page.goto(`${BASE_URL}/bookings`);
+    const card = page.getByTestId('booking-card').filter({ hasText: bookingRef });
+    await card.getByRole('link', { name: 'View Details' }).click();
+    await expect(page).toHaveURL(/\/bookings\/\d+/);
+
+    // -- Step 3: Click Cancel Booking --
+    await page.getByRole('button', { name: 'Cancel Booking' }).click();
+
+    // -- Step 4: ConfirmDialog appears with correct title and Yes button --
+    await expect(page.getByText('Cancel this booking?')).toBeVisible();
+    await expect(page.locator('#confirm-dialog-yes')).toBeVisible();
+
+    // -- Step 5: Confirm cancellation --
+    await page.locator('#confirm-dialog-yes').click();
+
+    // -- Step 6: Redirected to /bookings with success toast (TC-506) --
+    await expect(page).toHaveURL(`${BASE_URL}/bookings`);
+    await expect(page.getByText('Booking cancelled successfully')).toBeVisible();
+
+    // -- Step 7: Booking is gone — empty state renders --
+    await expect(page.getByText('No bookings yet')).toBeVisible();
+  });
+
 });

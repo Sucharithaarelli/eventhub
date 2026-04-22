@@ -13,7 +13,7 @@ async function withPersonalSeats(events, userId) {
 
   return events.map((e) => {
     const userBooked = booked[e.id] || 0;
-    return { ...e, availableSeats: Math.max(0, e.totalSeats - userBooked) };
+    return { ...e, availableSeats: Math.max(0, e.availableSeats - userBooked) };
   });
 }
 

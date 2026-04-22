@@ -1,6 +1,12 @@
 const { PrismaClient } = require('@prisma/client');
+const bcrypt = require('bcryptjs');
 
 const prisma = new PrismaClient();
+
+const testUsers = [
+  { email: 'rahulshetty1@gmail.com', password: 'Magiclife1!' },
+  { email: 'rahulshetty1@yahoo.com', password: 'Magiclife1!' },
+];
 
 // 3 static (admin) events — always visible to all users, seats never decrement
 const staticEvents = [
@@ -50,6 +56,17 @@ const staticEvents = [
 
 async function main() {
   console.log('🌱 Starting database seed…');
+
+  // Upsert test users (always sync password)
+  for (const u of testUsers) {
+    const hashed = await bcrypt.hash(u.password, 10);
+    await prisma.user.upsert({
+      where:  { email: u.email },
+      update: { password: hashed },
+      create: { email: u.email, password: hashed },
+    });
+    console.log(`✅ Upserted user: ${u.email}`);
+  }
 
   // Only clear non-static events and their bookings (preserve static events)
   const nonStaticEvents = await prisma.event.findMany({ where: { isStatic: false }, select: { id: true } });

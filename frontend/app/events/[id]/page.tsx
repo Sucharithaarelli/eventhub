@@ -37,7 +37,7 @@ function BookingConfirmation({ booking }: { booking: any }) {
 
       <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 mb-5 text-left space-y-2">
         <Row label="Booking Ref">
-          <span className="booking-ref font-mono font-bold text-indigo-600">{booking.data?.bookingRef}</span>
+          <span data-testid="booking-ref" className="booking-ref font-mono font-bold text-indigo-600">{booking.data?.bookingRef}</span>
         </Row>
         <Row label="Customer">{booking.data?.customerName}</Row>
         <Row label="Tickets">{booking.data?.quantity}</Row>

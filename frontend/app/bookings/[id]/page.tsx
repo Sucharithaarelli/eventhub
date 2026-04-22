@@ -154,7 +154,7 @@ export default function BookingDetailPage() {
         <div className="flex flex-wrap items-start justify-between gap-4 mb-8">
           <div>
             <div className="flex items-center gap-3 mb-2">
-              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-lg text-sm">
+              <span data-testid="booking-ref-badge" className="font-mono font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-lg text-sm">
                 {booking.bookingRef}
               </span>
               <Badge variant={booking.status === 'confirmed' ? 'success' : 'danger'}>

@@ -9,7 +9,7 @@ export default defineConfig({
   reporter: 'html',
 
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: 'https://eventhub.rahulshettyacademy.com',
     headless: true,
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
