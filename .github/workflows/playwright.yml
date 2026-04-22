@@ -1,0 +1,95 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Playwright E2E Tests
+#
+# PURPOSE:
+#   Runs the full Playwright test suite on every push to main and uploads
+#   the HTML report as a downloadable artifact.
+#
+# TESTS RUN AGAINST:
+#   https://eventhub.rahulshettyacademy.com  (production — no server setup needed)
+#
+# ARTIFACT:
+#   playwright-report/  → retained for 30 days, downloadable from the Actions run
+# ══════════════════════════════════════════════════════════════════════════════
+
+name: Playwright E2E Tests
+
+on:
+  push:
+    branches: [main]
+
+  # Allow manual runs from the GitHub Actions UI
+  workflow_dispatch:
+
+concurrency:
+  group: playwright-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '21.7.1'
+
+jobs:
+  playwright:
+    name: Run Playwright Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # ── Checkout ────────────────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Node.js setup ───────────────────────────────────────────────────────
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      # ── Install root dependencies (includes @playwright/test) ───────────────
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Install Playwright browsers ─────────────────────────────────────────
+      # Only installs Chromium — matches the single project in playwright.config.ts
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      # ── Run all Playwright tests ─────────────────────────────────────────────
+      # Tests target https://eventhub.rahulshettyacademy.com (set in playwright.config.ts)
+      # `|| true` ensures the upload-artifact step always runs even when tests fail
+      - name: Run Playwright tests
+        run: npx playwright test
+        continue-on-error: true
+        id: playwright-run
+
+      # ── Upload HTML report ───────────────────────────────────────────────────
+      - name: Upload Playwright HTML report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-${{ github.run_number }}
+          path: playwright-report/
+          retention-days: 30
+
+      # ── Job summary ─────────────────────────────────────────────────────────
+      - name: Test results summary
+        if: always()
+        run: |
+          if [ "${{ steps.playwright-run.outcome }}" = "success" ]; then
+            echo "### ✅ All Playwright tests passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ Some Playwright tests failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Triggered by** | @${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Report artifact** | \`playwright-report-${{ github.run_number }}\` |" >> $GITHUB_STEP_SUMMARY
+
+      # ── Fail the job if tests failed ─────────────────────────────────────────
+      - name: Assert tests passed
+        if: steps.playwright-run.outcome == 'failure'
+        run: exit 1
